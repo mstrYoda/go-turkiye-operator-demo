@@ -1,0 +1,6 @@
+apiVersion: goturkiye.com/v1
+kind: Hello
+metadata:
+  name: example-hello
+spec:
+  replicas: 1
