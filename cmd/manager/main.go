@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"k8s.io/apimachinery/pkg/types"
 	"os"
 	"runtime"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"goturkiye-operator/pkg/apis"
 	"goturkiye-operator/pkg/controller"
 	"goturkiye-operator/version"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/operator-framework/operator-sdk/pkg/k8sutil"
 	kubemetrics "github.com/operator-framework/operator-sdk/pkg/kube-metrics"
@@ -131,11 +133,44 @@ func main() {
 	// Add the Metrics Service
 	addMetrics(ctx, cfg)
 
+	workingNs, _ := k8sutil.GetOperatorNamespace()
+
+	client, err := crclient.New(cfg, crclient.Options{})
+	checkError(err, "failed to create new client")
+
+	leaderPod, err := k8sutil.GetPod(ctx, client, workingNs)
+	checkError(err, "failed to get leader pod")
+
+	leaderPod.Labels["leader"] = "true"
+	err = client.Update(ctx, leaderPod)
+	checkError(err, "failed to label leader pod")
+
+	operatorName, err := k8sutil.GetOperatorName()
+	checkError(err, "failed to get operator name")
+
+	existingService := &v1.Service{}
+	err = client.Get(ctx, types.NamespacedName{
+		Name:      fmt.Sprintf("%s-metrics", operatorName),
+		Namespace: workingNs,
+	}, existingService)
+	checkError(err, "failed to get metrics service")
+
+	existingService.Spec.Selector["leader"] = "true"
+	err = client.Update(ctx, existingService)
+	checkError(err, "failed to label metrics service")
+
 	log.Info("Starting the Cmd.")
 
 	// Start the Cmd
 	if err := mgr.Start(signals.SetupSignalHandler()); err != nil {
 		log.Error(err, "Manager exited non-zero")
+		os.Exit(1)
+	}
+}
+
+func checkError(err error, msg string) {
+	if err != nil {
+		log.Error(err, msg)
 		os.Exit(1)
 	}
 }
